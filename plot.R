@@ -96,8 +96,8 @@ p4
 
 p1 / p2 / p3 / p4
 
-ggsave(paste0(fr, 'output/atmos_dailyfluxes_', Sys.Date(), '.png'),
-       height = 9, width = 12, units = c("in"), dpi = 600)
+# ggsave(paste0(fr, 'output/atmos_dailyfluxes_', Sys.Date(), '.png'),
+#        height = 9, width = 12, units = c("in"), dpi = 600)
 # 
 # df %>%
 #   mutate(date_col = date(df$date)) %>%

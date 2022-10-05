@@ -7,35 +7,24 @@ library(viridis)
 library(scales)
 library(patchwork)
 # library(raster)
-library(rasterVis)
-library(sf)
-library(rworldmap)
-library(rworldxtra)
-library(cleangeo)
-library(terra)
-library(tidyterra)
+# library(rasterVis)
+# library(sf)
+# library(rworldmap)
+# library(rworldxtra)
+# library(cleangeo)
+# library(terra)
+# library(tidyterra)
 
 fr <- '/home/otto/data/atmos-flux-data/'
 
-df <- read_csv(paste0(fr, 'output/atmos-fluxnet.csv'))
+df <- read_csv(paste0(fr, 'output/atmos-fluxnet-20221004.csv')) %>%
+  mutate(day_col = date(date))
 
-df %>% summarise(FCH4tot = sum(FCH4, na.rm = T))
+pointsize = 1
 
-df %>% group_by(yday(date))
-
-daily <- df %>%
-  mutate(day_col = date(df$date)) %>%
-  group_by(day_col) %>%
-  summarize(TA_EPdaymean = mean(TA_EP, na.rm = T),
-            LEdaysum = sum(LE, na.rm = T),
-            FCdaysum = sum(FC, na.rm = T) * 18000 / 10e3,
-            FCH4daysum = sum(FCH4, na.rm = T) * 18000 / 10e3
-            )
-daily
-
-p1 <- daily %>% 
-  ggplot(aes(x=day_col, y = TA_EPdaymean)) +
-  geom_point(stat = 'identity', size = 2.5) +
+p1 <- df %>% 
+  ggplot(aes(x=date, y = TA_EP)) +
+  geom_point(stat = 'identity', size = pointsize) +
   labs(x = 'date', y = 'TA (C)') +
   theme_minimal() +
   theme(legend.position = 'none', 
@@ -48,9 +37,9 @@ p1 <- daily %>%
   )
 p1
 
-p2 <- daily %>% 
-  ggplot(aes(x=day_col, y = LEdaysum)) +
-  geom_bar(stat = 'identity', fill = 'black') +
+p2 <- df %>% 
+  ggplot(aes(x=date, y = LE)) +
+  geom_point(stat = 'identity', size = pointsize) +
   labs(x = 'date', y = 'LE (W m-2)') +
   theme_minimal() +
   theme(legend.position = 'none', 
@@ -63,10 +52,10 @@ p2 <- daily %>%
   )
 p2
 
-p3 <- daily %>% 
-  ggplot(aes(x=day_col, y = FCdaysum)) +
-  geom_bar(stat = 'identity', fill = 'black') +
-  labs(x = 'date', y = 'FC (mmol m-2)') +
+p3 <- df %>% 
+  ggplot(aes(x=date, y = FC)) +
+  geom_point(stat = 'identity', size = pointsize) +
+  labs(x = 'date', y = 'FC (umol m-2 s-1)') +
   theme_minimal() +
   theme(legend.position = 'none', 
         panel.grid.major.x = element_blank(),
@@ -79,10 +68,10 @@ p3 <- daily %>%
 p3
 
 
-p4 <- daily %>% 
-  ggplot(aes(x=day_col, y = FCH4daysum)) +
-  geom_bar(stat = 'identity', fill = 'black') +
-  labs(x = 'date', y = 'FCH4 (mmol m-2)') +
+p4 <- df %>% 
+  ggplot(aes(x=date, y = FCH4)) +
+  geom_point(stat = 'identity', size = pointsize) +
+  labs(x = 'date', y = 'FCH4 (umol m-2 s-1)') +
   theme_minimal() +
   theme(legend.position = 'none', 
         panel.grid.major.x = element_blank(),
@@ -96,8 +85,8 @@ p4
 
 p1 / p2 / p3 / p4
 
-# ggsave(paste0(fr, 'output/atmos_dailyfluxes_', Sys.Date(), '.png'),
-#        height = 9, width = 12, units = c("in"), dpi = 600)
+ggsave(paste0(fr, 'output/atmos_timeseries_', Sys.Date(), '.png'),
+       height = 9, width = 12, units = c("in"), dpi = 600)
 # 
 # df %>%
 #   mutate(date_col = date(df$date)) %>%

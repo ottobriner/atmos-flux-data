@@ -17,7 +17,7 @@ library(tidyterra)
 
 fr <- '/home/otto/data/atmos-flux-data/'
 
-df <- read_csv(paste0(fr, 'output/atmos-fluxnet-20221004.csv'))%>%
+df <- read_csv(paste0(fr, 'output/atmos-fluxnet-20221004.csv')) %>%
   mutate(day_col = date(date))
 df
 
@@ -101,5 +101,5 @@ p4
 
 (p1 + p2) / (p3 + p4)
 
-ggsave(paste0(fr, 'output/atmos_fluxhist_', Sys.Date(), '.png'),
-       height = 9, width = 12, units = c("in"), dpi = 600)
+# ggsave(paste0(fr, 'output/atmos_fluxhist_', Sys.Date(), '.png'),
+#        height = 9, width = 12, units = c("in"), dpi = 600)
