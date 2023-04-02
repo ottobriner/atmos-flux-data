@@ -25,7 +25,6 @@ def getNAIPImage(lon, lat, sze, filename, dateMin = '2017-01-01', dateMax = '202
     https://developers.google.com/earth-engine/datasets/catalog/COPERNICUS_S2_SR
     '''
 
-
     print('Downloading NAIP satellite images ... ')
     
     # define the area of interest, using the Earth Engines geometry object
@@ -42,8 +41,8 @@ def getNAIPImage(lon, lat, sze, filename, dateMin = '2017-01-01', dateMax = '202
     db = ee.Image(ee.ImageCollection('USDA/NAIP/DOQQ')\
                        .filterBounds(aoi)\
                        .filterDate(ee.Date(dateMin), ee.Date(dateMax))\
-#                       .sort('CLOUDY_PIXEL_PERCENTAGE')\
-                       .first())
+                       .sort('time_start', False)\
+		       .first())
     
     # add the latitude and longitude
     db = db.addBands(ee.Image.pixelLonLat())
@@ -56,7 +55,7 @@ def getNAIPImage(lon, lat, sze, filename, dateMin = '2017-01-01', dateMax = '202
     for selection in bands:
         task = ee.batch.Export.image.toDrive(image=db.select(selection),
                                      description=selection,
-                                     scale=10,
+                                     scale=0.6,
                                      region=aoi,
                                      fileNamePrefix=selection,
                                      crs='EPSG:4326',
@@ -64,7 +63,7 @@ def getNAIPImage(lon, lat, sze, filename, dateMin = '2017-01-01', dateMax = '202
         task.start()
 
         url = db.select(selection).getDownloadURL({
-            'scale': 10,
+            'scale': 0.6,
             'crs': 'EPSG:4326',
             'fileFormat': 'GeoTIFF',
             'region': aoi})
