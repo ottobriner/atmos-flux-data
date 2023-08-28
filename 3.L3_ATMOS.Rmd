@@ -1,0 +1,319 @@
+---
+title: "6.L3"
+author: "Otto Briner"
+date: "`r format(Sys.Date(), '%Y/%m/%d')`"
+knit: (function(inputFile, encoding) { 
+      out_dir <- 'output';
+      rmarkdown::render(inputFile,
+                        encoding=encoding, 
+                        output_file=file.path('/home/otto/git/Manitoba_Flux_Processing/ATMOS_processing/', out_dir, 
+                        paste0(substr(inputFile,nchar(inputFile)-14,nchar(inputFile)-4), '_', Sys.Date(),'.html'))) })
+
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+rm(list=ls())
+
+library(plotly)
+#library(readxl)
+library(tidyverse)
+library(caret)
+library(lubridate)
+library(REddyProc)
+library(tidyverse)
+library(dplyr)
+library(Rcpp)
+
+# set wd
+getwd()
+#dir <- "../Flux-tower/"
+# dir <- "G:/.shortcut-targets-by-id/1txCh9lZ7VGCujXGvBaJCMVnuxT-65q4K/Micromet Lab/Projects/2019-Burns\ Bog 2/Flux-tower"
+dir <- "/home/otto/data/atmos-flux-data"
+file_suffix = ''
+knitr::opts_knit$set(root.dir = dir)
+
+```
+
+```{r Load data, echo=FALSE, include=FALSE}
+EddyData.F <- fLoadTXTIntoDataframe(paste0(dir, "/processed/REddyProc_input/for_gap_filling_partitioning_ATMOS_2023-04-25.txt"))
+```
+
+```{r Gap-fill and partition in REddyProc, echo=FALSE, include=FALSE}
+# Converting DOY to integers
+EddyData.F$DoY <- floor(EddyData.F$DoY)
+
+# Add time stamp in POSIX time format -------------------------------------
+EddyDataWithPosix.F <- fConvertTimeToPosix(EddyData.F, 'YDH',Year = 'Year',Day = 'DoY',Hour = 'Hour') # Year.s, Day.s, Hour.s deprecated
+
+
+# Initalize R5 reference class sEddyProc for post-processing of eddy data with the variables needed for post-processing later -------------------------------------
+EddyProc.C <- sEddyProc$new('ATMOS', EddyDataWithPosix.F,
+														c("NEE","FCH4","LE","H","Rg","Tair",'Tsoil15cm_below',"rH","VPD","Ustar","Wind_dir"))
+
+uStarTh <- EddyProc.C$sEstUstarThresholdDistribution(nSample = 100L, probs = c(0.05, 0.5, 0.95)) #added 14/12/2020 M.Nyberg
+uStarTh %>%
+  filter( aggregationMode == "year") %>%
+  select( uStar, "5%", "50%", "95%") #added 14/12/2020 M.Nyberg
+
+uStarThAnnual <-usGetAnnualSeasonUStarMap(uStarTh)[-2] #added 14/12/2020 M.Nyberg
+uStarSuffixes <- colnames(uStarThAnnual)[-1] #added 14/12/2020 M.Nyberg
+print(uStarThAnnual) #added 14/12/2020 M.Nyberg
+
+EddyProc.C$sGetUstarScenarios() #added 22/03/2021 M.Nyberg
+EddyProc.C$sMDSGapFillUStarScens('NEE', FillAll = TRUE) #added M.Nyberg 26/03/2021
+EddyProc.C$sMDSGapFillUStarScens('FCH4', FillAll = TRUE) #added M.Nyberg 26/03/2021
+
+
+grep("NEE_.*_f$",names(EddyProc.C$sExportResults()) #added M.Nyberg 26/03/2021
+, value = TRUE)
+grep("NEE_.*_fsd$",names(EddyProc.C$sExportResults()) #added M.Nyberg 26/03/2021
+, value = TRUE)
+
+
+
+# Use MDS for gap-filling NEE, H, LE, and FCH4 (but also use RF for FCH4) ----------------------------------
+EddyProc.C$sMDSGapFill('NEE', FillAll.b = TRUE)
+EddyProc.C$sMDSGapFill('LE', FillAll.b = TRUE)
+EddyProc.C$sMDSGapFill('H', FillAll.b = TRUE)
+EddyProc.C$sMDSGapFill('FCH4', FillAll.b = TRUE)
+EddyProc.C$sMDSGapFill('Wind_dir', FillAll.b = TRUE)
+
+
+
+# Gap-filling met data for partitioning  ----------------------------------
+EddyProc.C$sSetLocationInfo(Lat_deg.n = 41.702, Long_deg.n = -87.996, TimeZone_h.n = -6)
+EddyProc.C$sMDSGapFill('Tair', FillAll.b = FALSE)
+EddyProc.C$sMDSGapFill('VPD', FillAll.b = FALSE)
+EddyProc.C$sMDSGapFill('Rg', FillAll.b = FALSE)
+EddyProc.C$sMDSGapFill('Tsoil15cm_below', FillAll.b = FALSE)
+# EddyProc.C$sMDSGapFill('Tsoil10cm_above', FillAll.b = FALSE)
+# EddyProc.C$sMDSGapFill('Tsoil40cm_above', FillAll.b = FALSE)
+
+
+# Apply nighttime gap-filling algorithm -----------------------------------
+EddyProc.C$sMRFluxPartition()
+
+resP <- lapply(uStarSuffixes, function(suffix){ #added M.Nyberg 26/03/2021
+EddyProc.C$sMRFluxPartition(Suffix.s = suffix)
+})
+
+grep("GPP.*_f$|Reco", #added M.Nyberg 26/03/2021
+names(EddyProc.C$sExportResults()), value = TRUE)
+
+#EddyProc.C$sApplyUStarScen(EddyProc.C$sMRFluxPartition )
+
+EddyProc.C$sPlotFingerprintY('GPP_U50_f', Year = as.numeric(EddyData.F$Year[1]))
+```
+
+```{r Gap-fill and partition in REddyProc_1, echo=FALSE, include=FALSE}
+# Apply daytime gap-filling algorithm -----------------------------------
+EddyProc.C$sGLFluxPartition()
+
+dayP <- lapply(uStarSuffixes, function(suffix){ #added M.Nyberg 26/03/2021
+EddyProc.C$sGLFluxPartition(Suffix.s = suffix)
+})
+
+grep("GPP.*_f$|Reco|", #added M.Nyberg 26/03/2021
+names(EddyProc.C$sExportResults()), value = TRUE)
+
+
+# Output results -----------------------------------
+
+FilledEddyData.F <- EddyProc.C$sExportResults()
+names(FilledEddyData.F)
+```
+
+```{r Gap-fill and partition in REddyProc_2, echo=FALSE, include=FALSE}
+# Plot results -----------------------------------
+
+# daily sums (from REddyProc) - CHECK UNITS!
+
+setwd(dir)
+EddyProc.C$sPlotDailySums(Var.s = 'LE_f',Format.s = "png", unit.s = "MJ/m2/day")
+EddyProc.C$sPlotDailySums(Var.s = 'H_f',Format.s = "png", unit.s = "MJ/m2/day")
+EddyProc.C$sPlotDailySums(Var.s = 'NEE_f',Format.s = "png", unit.s = "gC/m2/day")
+EddyProc.C$sPlotDailySums(Var.s = 'FCH4_f',Format.s = "png", unit.s = "gC/m2/day")
+EddyProc.C$sPlotDailySums(Var.s = 'GPP_f',Format.s = "png", unit.s = "gC/m2/day")
+EddyProc.C$sPlotDailySums(Var.s = 'Reco',Format.s = "png", unit.s = "gC/m2/day")
+EddyProc.C$sPlotDailySums(Var.s = 'GPP_DT',Format.s = "png", unit.s = "gC/m2/day")
+EddyProc.C$sPlotDailySums(Var.s = 'Reco_DT',Format.s = "png", unit.s = "gC/m2/day")
+
+# Could create other plots to check the results
+#....
+
+```
+
+```{r Save full REddyPro output, echo=FALSE, include=FALSE}
+
+write_csv(FilledEddyData.F,paste0("/home/otto/data/atmos-flux-data/processed/REddyProc_gapfilled_partition_fulloutput_ATMOS_", Sys.Date(), file_suffix, ".csv"))
+```
+
+```{r Save only essential variables, echo=FALSE, include=FALSE}
+essential_variables <- grep("NEE_f$|NEE_fsd$|GPP_f$|GPP_DT.*$|Reco|Reco_DT.*$|LE_f$|LE_fsd$|H_f$|H_fsd$|FCH4_f$|FCH4_fsd$|NEE_uStar_f|NEE_U05_f|NEE_U50_f|NEE_U95_f|NEE_uStar_fsd|NEE_U05_fsd|NEE_U50_fsd|NEE_U95_fsd",
+														names(EddyProc.C$sExportResults()), value = TRUE)
+essential_variables
+
+# # Remove WTH - Comment out when Young Site starts logging WTH
+# essential_variables <- str_remove(essential_variables, "WTH_.*")
+
+essential <- FilledEddyData.F[,which(names(FilledEddyData.F) %in% essential_variables)]
+```
+
+```{r gap-fill FCH4 using random forest from Kim et al. 2019, echo=FALSE, include=FALSE}
+# 
+# # variable we need for FCH4 gap-filling
+# 
+# Input <- read.table("/home/otto/data/atmos-flux-data/processed/REddyProc_input/for_gap_filling_partitioningATMOS_2023-02-06.txt", header = T)
+# 
+# # Delete first row that contains units
+# Input <- Input[-1, ]
+# Input <- data.frame(lapply(Input, function(x) as.numeric(as.character(x))))
+# 
+# Input$HH <- floor(Input$Hour)
+# Input$MM <- (Input$Hour-Input$HH)*60
+# 
+# # Create time stamp
+# Input$TIMESTAMP_END <- make_datetime(Input$Year, 1, Input$DoY, Input$HH, Input$MM)
+# 
+# # Define predictors
+# predictors <- c("FCH4", "Ustar","NEE","LE","H","Rg","Tair",'Tsoil15cm_below',
+#                 "rH","VPD","DoY","Wind_dir") 
+# 
+# ML.df <- Input %>% select(predictors)
+# 
+# # Replace all -9999 with NA
+# ML.df[ML.df == -9999] <- NA
+# 
+# # Add sine and cosine functions
+# ML.df$s <- sin((ML.df$DoY-1)/365*2*pi)
+# ML.df$c <- cos((ML.df$DoY-1)/365*2*pi)
+# 
+# # period when FCH4 is not missing
+# wm_only <- ML.df[!is.na(ML.df$FCH4), ]
+# 
+# ############### Random forest run 20x ###############
+# 
+# #Add parallel processing for the fast processing if you want to
+# library(parallel)
+# library(doParallel)
+# 
+# combined_result <- list()
+# 
+# for(i in 1:7){
+#   start_time <- Sys.time()
+#   # setting seed
+#   set.seed(i)
+#   train_rows <- sample(1:nrow(wm_only), 0.75*nrow(wm_only))
+#   # select the training set
+#   train_set <- wm_only %>% slice(train_rows)
+#   # select the validation set
+#   test_set <- anti_join(wm_only, train_set)
+#   #### option 1. random forest model with mtry tuning
+#   #cluster <- makeCluster(6)
+#   cluster <- parallel::makeCluster(10, setup_timeout = 0.5)
+#   registerDoParallel(cluster)
+#   RF_FCH4 <- train(FCH4 ~ ., data = train_set[,predictors],
+#    								 method = "rf",
+#    								 preProcess = c("medianImpute"),                #impute missing met data with median
+#    								 trControl=trainControl(method = "cv",   #three-fold cross-validation for model parameters 3 times
+#    								 											number = 3),
+#    								 na.action = na.pass,
+#    								 # allowParallel=FALSE, # This requires parallel packages. Otherwise you can choose FALSE.
+#    								 ntree=400, # can generate more trees
+#    								 importance = TRUE)
+#   
+#   RF_FCH4$bestTune
+#   RF_FCH4$results
+#   
+#   ############### Results
+#   # variable importance
+#   plot(varImp(RF_FCH4, scale = FALSE), main="variable importance")
+#   
+#   #generate FCH4_rf predictions for testset
+#   test_set$FCH4_rf <- predict(RF_FCH4, test_set, na.action = na.pass)
+#   regrRF <- lm(test_set$FCH4_rf ~ test_set$FCH4); 
+#   print(summary(regrRF))
+#   ggplot(test_set, aes(x=FCH4, y=FCH4_rf)) + geom_abline(slope = 1, intercept = 0)+
+#     geom_point() + geom_smooth(method = "lm") + ggtitle("testset")
+#   
+#   # whole dataset
+#   result <- data.frame(FCH4 = ML.df$FCH4) # you can add datetime column here if you want to.
+#   result$FCH4_RF_model <- predict(RF_FCH4, ML.df, na.action = na.pass) # FCH4 RF model
+#   result$FCH4_RF_filled <- ifelse(is.na(result$FCH4),result$FCH4_RF_model,result$FCH4) # gap-filled column (true value when it is, gap-filled value when missing)
+#   result$FCH4_RF_residual <- ifelse(is.na(result$FCH4),NA,result$FCH4_RF_model - result$FCH4) # residual (model - obs). can be used for random uncertainty analysis
+#   
+#   # time series
+#   result$DateTime <- Input$TIMESTAMP_END
+#   
+#   result %>% ggplot(aes(DateTime,FCH4)) + geom_point() + 
+#     theme_bw() + ylab(expression(paste("FCH4 (umol ", m^-2,s^-1,")"))) %>% 
+#     print()
+#   result %>% ggplot(aes(DateTime,FCH4_RF_filled)) + geom_point(color="red",alpha=0.5) +
+#     geom_point(aes(DateTime,FCH4),color="black")+
+#     theme_bw() + ylab(expression(paste("FCH4 (umol ", m^-2,s^-1,")"))) %>% 
+#     print()
+#   
+#   # whole data comparison
+#   print(ggplot(result, aes(x = FCH4, y =FCH4_RF_model)) + geom_abline(slope = 1, intercept = 0)+
+#     geom_point() + geom_smooth(method = "lm") + ggtitle("whole dataset"))
+#   regrRF_whole <- lm(result$FCH4_RF_model ~ result$FCH4);
+#   print(summary(regrRF_whole))
+#   
+#   
+#   result$iteration <- i 
+#   combined_result[[i]] <- result
+#   end_time <- Sys.time()
+#   end_time - start_time
+# }
+# 
+# rf_result_df <- data.table::rbindlist(combined_result)
+# 
+# write_csv(rf_result_df,paste0("/home/otto/data/atmos-flux-data/processed/ATMOS_rf_result", Sys.Date(), ".csv"))
+
+```
+
+```{r Load L2 data, echo=FALSE, include=FALSE}
+
+L2 <- read.csv(paste0("/home/otto/data/atmos-flux-data/processed/ATMOS_L2_2023-04-25", file_suffix, ".csv"))
+
+met <- read.csv(paste0('/home/otto/data/atmos-flux-data/processed/Gapfilled_biomet_2023-04-25', file_suffix, '.csv'))
+
+
+
+# First, RF CH4 gap-filled data (figure out uncertainty for RF gap-filling)
+# L2$FCH4_gf_RF <- result$FCH4_RF_filled
+
+# REddyProc data 
+head(L2)
+head(essential)
+head(met)
+
+# Check to make sure files are of the same length and if TRUE, append to L2
+if (nrow(L2) == nrow(essential)){
+  # If TRUE, Combine
+  L3 <- cbind(L2,essential)}
+
+# # drop old date and time cols from met
+# met <- met %>% select(!(date:time))
+
+L3 <- merge(L3, met, by = c('DATE'), suffixes = c('','.met'))
+
+write_csv(L3,paste0("/home/otto/data/atmos-flux-data/processed/ATMOS_L3_", Sys.Date(), file_suffix, ".csv"))
+
+L3
+
+```
+
+```{r format for fluxgapfill, echo=FALSE, include=FALSE}
+
+L3 <- read.csv(paste0('/home/otto/data/atmos-flux-data/processed/ATMOS_L3_', Sys.Date(), file_suffix, '.csv'))
+
+L3[is.na(L3)] = -9999
+
+write_csv(L3, paste0("/home/otto/data/atmos-flux-data/processed/ATMOS_L3_", Sys.Date(), file_suffix, "_fluxgapfill.csv"))
+
+```
+
+

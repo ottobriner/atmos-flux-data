@@ -1,0 +1,774 @@
+---
+title: "5.L2_filtering"
+author: "Otto Briner"
+date: "`r format(Sys.Date(), '%Y/%m/%d')`"
+knit: (function(inputFile, encoding) { 
+      out_dir <- 'output';
+      rmarkdown::render(inputFile,
+                        encoding=encoding, 
+                        output_file=file.path('/home/otto/git/Manitoba_Flux_Processing/ATMOS_processing/', out_dir, 
+                        paste0(substr(inputFile,nchar(inputFile)-27,nchar(inputFile)-4), '_', Sys.Date(),'.html'))) })
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+rm(list=ls())
+
+library(plotly)
+library(readxl)
+library(REddyProc)
+library(tidyverse)
+library(dplyr)
+library(lubridate)
+library(gtools)
+
+# set wd
+getwd()
+dir <- "/home/otto/data/atmos-flux-data"
+file_suffix <- ''
+knitr::opts_knit$set(root.dir = dir)
+```
+
+```{r Load non-filtered data, echo=FALSE, include=FALSE}
+# read fluxnet
+input<-read.csv(paste('./processed/ATMOS_L1_fluxnet_2023-04-10.csv',sep=''))
+input$DATE<-as.POSIXct(input$DATE,format="%Y-%m-%d %H:%M:%S", tz = "Etc/GMT+6")
+fluxnet<-input
+
+# read full_output
+input<-read.csv(paste('./processed/ATMOS_L1_2023-04-10.csv',sep=''))
+input$DATE<-as.POSIXct(input$DATE,format="%Y-%m-%d %H:%M:%S", tz = "Etc/GMT+6")
+Data_QAQC<-input
+```
+
+```{r Define L2 filters, echo=FALSE, include=FALSE}
+pitch_max <- 7 #[deg]
+pitch_min <- -7 #[deg]
+# WD -> ADD LATER!
+qc_flag <- 1 #[#]
+w.ts_cov_max <- 0.5 #[m+1K+1s-1]
+ts_var_max <- 3 #[K+2]
+mean_value_RSSI_LI.7500_min <- 50 #[#] % CONFIRM
+h2o_flux_min <- -2 #[mmol+1s-1m-2]
+h2o_flux_max <- 15 #[mmol+1s-1m-2]
+h2o_var_max <- 9000
+h2o_mean_max <- 2000 #[mmol/m3]
+co2_mean_min <- 12 #[mmol/m3]
+co2_var_max <- 0.2
+co2_flux_max <- 50 #[µmol+1s-1m-2]
+co2_flux_min <- -50 #[µmol+1s-1m-2]
+rssi_77_mean_min <- 10; #[#] 
+ch4_mean_min <- 1.7 # [ppm]
+ch4_var_max <- 0.00002
+ch4_flux_min <- -0.2 #[µmol+1s-1m-2]
+ch4_flux_max <- 0.7 #[µmol+1s-1m-2]
+ustar_max <- 1.2
+wind_max <- 360 #degrees - added 14/12/20 - M.Nyberg - exclude above
+wind_min <- 0 #degrees - added 14/12/20 - M.Nyberg - exclude below
+wind_pr_min <- 90 #degrees - above is prairie
+wind_pr_max <- 315 #degrees - below is prairie
+wind_fr_min <- wind_pr_max #degrees - above is forest
+wind_fr_max <- wind_pr_min #degrees - below is forest
+L_max <- 10000 # [m] - added 13/08/21 - D. Ng
+L_min <- -10000 # [m] - added 13/08/21 - D. Ng
+
+
+# Plot filtering variable of interest to check values
+plot_ly(data = Data_QAQC, x = ~DATE, y = ~co2_var, name = 'pitch', type = 'scatter', mode = 'line') %>%
+ layout(yaxis = list(range = c()), 
+        shapes = list(type = "line", y0 = co2_var_max, y1 = co2_var_max, x0 = Data_QAQC$DATE[1], x1 = Data_QAQC$DATE[nrow(Data_QAQC)]),
+        title = 'CO2, filtered and unfiltered') %>%  
+  toWebGL()
+```
+
+```{r Create flags (with the exception of the ustar flag), echo=FALSE, include=FALSE}
+Data_QAQC$badrot <- ifelse(input$pitch > pitch_max | input$pitch < pitch_min,1,0)
+
+Data_QAQC$badt <- ifelse(abs(input$w.ts_cov) > w.ts_cov_max | input$ts_var > ts_var_max | input$qc_H > qc_flag,1,0)
+
+Data_QAQC$badq <- ifelse(input$h2o_flux < h2o_flux_min | input$h2o_flux > h2o_flux_max | input$h2o_var > h2o_var_max | input$h2o_mean > h2o_mean_max | input$mean_value_RSSI_LI.7500 < mean_value_RSSI_LI.7500_min | input$qc_LE > qc_flag,1,0)
+
+Data_QAQC$badc <- ifelse(input$co2_flux < co2_flux_min | input$co2_flux > co2_flux_max | input$co2_var > co2_var_max | input$co2_mean < co2_mean_min | input$mean_value_RSSI_LI.7500 < mean_value_RSSI_LI.7500_min | input$qc_co2_flux > qc_flag,1,0)
+
+Data_QAQC$badm <- ifelse(input$ch4_flux < ch4_flux_min | input$ch4_flux > ch4_flux_max | input$ch4_var > ch4_var_max | input$ch4_mean < ch4_mean_min | input$rssi_77_mean < rssi_77_mean_min | input$qc_ch4_flux > qc_flag,1,0)
+
+Data_QAQC$badwind <- ifelse(input$wind_dir > wind_max | input$wind_dir < wind_min,1,0) #added 14/12/20 - M.Nyberg
+
+Data_QAQC$badL <- ifelse(input$L > L_max | input$L < L_min,1,0) # Added 13/08/21 - D.Ng
+
+Data_QAQC$badwindffp <- ifelse(input$wind_dir > wind_pr_max & input$wind_dir < wind_pr_min,1,0)
+
+# Data_QAQC$wind_pr <- ifelse(input$wind_dir < wind_pr_max & input$wind_dir > wind_pr_min,1,0)
+# 
+# Data_QAQC$wind_fr <- ifelse(input$wind_dir < wind_fr_max & input$wind_dir > wind_fr_min,1,0)
+# 
+# Data_QAQC$wind_dir_ffp <- ifelse(Data_QAQC$wind_pr == 1,yes='prairie',no='forest')
+
+```
+
+### CO~2~ Filtering
+```{r Filter relevant CO2 variables to run ustar filtering next, echo=FALSE, warning=FALSE}
+Data_QAQC$co2_flux[Data_QAQC$badc == 1] <- NA
+
+plot_ly(data = input, x = ~DATE, y = ~co2_flux, name = 'original', type = 'scatter', mode = 'markers',marker = list(size = 3)) %>%
+  add_trace(data = Data_QAQC, x = ~DATE, y = ~co2_flux, name = 'filtered', mode = 'markers') %>%
+  layout(title = 'CO2, filtered and unfiltered') %>% 
+  toWebGL()
+
+plot_ly(data = Data_QAQC, x = ~DATE, y = ~co2_flux, name = 'original', type = 'scatter', mode = 'markers',marker = list(size = 3)) %>%
+  layout(title = 'CO2, unfiltered only') %>% 
+  toWebGL()
+```
+
+```{r Make met time series, echo=FALSE, include=FALSE}
+
+# Loading biomet data
+
+# 2023/01/27 - replacing biomet output compilation from Darian Ng with ATMOS biomet
+
+met <- data.frame()
+
+# fp <- paste("/home/otto/git/ATMOS484/output/ATMOS484_2023-04-21_trimmed.csv")
+path <- "/home/otto/git/ATMOS484/output/"
+# path <- "/home/otto/data/atmos-flux-data/output/EP_outputs/"
+
+
+# List only ATMOS484 output files, and only the ones manually trimmed
+raw.files <- list.files(path = path, pattern = "ATMOS484_.+_trimmed", recursive = FALSE)
+# raw.files <- list.files(path = path, pattern = "ATMOS484.csv", recursive = FALSE)
+raw.data <- data.frame()
+
+for(i in 1:length(raw.files)) {
+  # Get header names
+  names_temp <- names(read.csv(paste(path,"/",raw.files[i],sep=""),skip=0,sep=",",header=TRUE,dec="."))
+	
+	# Load data & apply header names
+	temp <- read.csv(paste(path,"/",raw.files[i],sep=""),skip=1,header=FALSE) #skip=3 means skip the first 3 rows of the file
+	names(temp) <- names_temp
+	
+	# Append to file
+	# raw.data <- smartbind(raw.data,temp, fill = "NA")
+	raw.data <- bind_rows(raw.data,temp)
+}
+
+```
+
+```{r parse flux timestamp on ATMOS484 output, echo=FALSE, include=FALSE}
+####
+# 2. Creating a Timestamp with date and time variable to order the data by date-time
+###
+raw.data$Timestamp<-as.POSIXct(raw.data$datetime, format="%Y-%m-%dT%H:%M:%S.0", tz = "Etc/GMT+6")
+
+data.ordered<-raw.data[order(raw.data$Timestamp, decreasing = FALSE ),]
+
+data.ordered[1,1:5]
+data.ordered[nrow(data.ordered),1:5]
+
+####
+#3. GAPFILLING ROWS BY GENERATING A NEW FILE  (Adapted from my "Gapfilling incomplete Time series" script)
+#####
+
+met<-data.ordered
+```
+
+```{r old loading for single met file, echo=FALSE, include=FALSE}
+# 
+# fp <- paste("/home/otto/git/ATMOS484/output/ATMOS484.csv")
+# 
+# 
+# # Get header names
+# names_temp <- names(read.csv(fp))
+# 
+# # Load data and apply header names
+# temp <- read.csv(fp)
+# names(temp) <- names_temp
+# 
+# # Append to file
+# met <- smartbind(met, temp, fill="NA")
+```
+
+```{r parse met timestamp, echo=FALSE, include=FALSE}
+# # Dropping all flux columns from ATMOS484
+# met <- met %>% select(!(datetime:ch4_tc_3_mean))
+# 
+# # Parse met tower timestamp
+# met$time <- str_pad(met$Time, 4, 'left', pad = '0')
+# met$hour <- str_sub(met$time, 0, 2)
+# met$min <- str_sub(met$time, 3, 5)
+# met <- met %>% 
+#   fill(hour, .direction = 'up') %>% 
+#   mutate(hour = str_replace_all(hour, '24', '00'),
+#          min = replace_na(min, '00'))
+# met$time <- paste0(met$hour, met$min)
+# met$DOM <- str_pad(met$DOM, 2, 'left', pad = '0')
+# met$Month <- str_pad(met$Month, 2, 'left', pad = '0')
+# 
+# met <- met %>% 
+#   fill(Year, Month, DOM, .direction = 'down') %>% 
+#   fill(Year, Month, DOM, .direction = 'up')
+# 
+# met$year <- paste0('20', met$Year)
+# 
+# # format before correcting midnight dates
+# met$date <- paste0(met$year, '-', met$Month, '-', met$DOM) 
+# met$Timestamp <- paste(met$date, met$time)
+# met$Timestamp
+# 
+# for(i in 1:length(met$Timestamp)){ 
+#   if (met$time[i]=='0000'){ # breaks if met stops on 0000h!
+#     if (met$Timestamp[i] %in% c('2022-01-31 0000',
+#                         '2022-02-28 0000',
+#                         '2022-03-31 0000',
+#                         '2022-04-30 0000',
+#                         '2022-05-31 0000',
+#                         '2022-06-30 0000',
+#                         '2022-07-31 0000',
+#                         '2022-08-31 0000',
+#                         '2022-09-30 0000',
+#                         '2022-10-31 0000',
+#                         '2022-11-30 0000',
+#                         '2022-12-31 0000',
+#                         '2023-01-31 0000',
+#                         '2023-02-28 0000',
+#                         '2023-03-31 0000',
+#                         '2023-04-30 0000')){
+#       if (met$date[i] == '2022-12-31'){ # Happy New Year
+#         met$year[i] <- met$year[i+1]
+#         met$Month[i] <- met$Month[i+1]
+#         met$DOM[i] <- met$DOM[i+1] 
+#       }else
+#       met$Month[i] <- met$Month[i+1] # Happy New Month
+#       met$DOM[i] <- met$DOM[i+1]
+#     }else
+#     met$DOM[i] <- met$DOM[i+1] # Happy New Day
+#   }
+# }
+# 
+# # reformat with correct midnight dates
+# met$date <- paste0(met$year, '-', met$Month, '-', met$DOM)
+# met$Timestamp <- paste(met$date, met$time)
+# 
+# met$Timestamp<-as.POSIXct(paste(met$date, met$time), format="%Y-%m-%d %H%M", tz = "Etc/GMT+6")
+# # met$Timestamp <- as.POSIXct(met$date, tz = "Etc/GMT+6")
+# 
+# # Replace after 2022-11-30 23:30:00 with new timestamp
+# newTimestamp <- seq(from = as.POSIXct('2022-12-01 00:00:00 -06', tz = "Etc/GMT+6"), length = (48*(31+31+28)), by=difftime(met$Timestamp[2],met$Timestamp[1], "Etc/GMT+6"))
+# istart <- which(is.na(met$Timestamp))[1]-1
+# 
+# met$Timestamp[istart:(istart + length(newTimestamp) - 1)] <- newTimestamp
+```
+
+```{r next, echo=FALSE, include=FALSE}
+
+# datetime is parsed to Timestamp, so dropping all flux columns from ATMOS484
+met <- met %>% select(!(datetime:ch4_tc_3_mean))
+
+# Hour and Year columns for REddyProc ustar filtering
+met$hour <- as.numeric(str_sub(met$Timestamp, 12, 13)) + (as.numeric(str_sub(met$Timestamp, 15, 16)) / 60)
+met$year <- as.numeric(str_sub(met$Timestamp, 1, 4))
+
+# Creating columns for new & renamed variables: net radiation, saturated vapour pressure (es), vpd. --> Missing Soil Heat Flux, so can't derive soil heat flux (G), & available energy (ae),
+
+met$NR <- met$RN # is radiation from met tower in Wm-2?
+met$Tsoil_mean <- rowMeans(select_if(met, grepl('Tsoil_', names(met)) & !grepl('cm', names(met)) & !grepl('mean', names(met))), na.rm=T)
+met$SWC_mean <- rowMeans(select_if(met, grepl('SWC_', names(met)) & !grepl('cm', names(met)) & !grepl('mean', names(met))), na.rm=T)
+
+met$DOY <- yday(met$Timestamp)
+
+met$DOY_START <- fluxnet$DOY_START[pmatch(met$Timestamp, fluxnet$DATE)]
+met$DOY_END <- fluxnet$DOY_END[pmatch(met$Timestamp, fluxnet$DATE)]
+
+met$TA_EP <- fluxnet$TA_EP[pmatch(met$Timestamp, fluxnet$DATE)]
+met$RH_EP <- fluxnet$RH_EP[pmatch(met$Timestamp, fluxnet$DATE)]
+met$es <- 0.611*exp(17.502*met$TA_EP/(met$TA_EP+240.97))
+met$VPD <- met$es*(1-(met$RH_EP/100))
+met$SW_IN_POT <- fluxnet$SW_IN_POT[pmatch(met$Timestamp, fluxnet$DATE)]
+
+###
+# GAPFILLING: Checking for gaps in half-hourly data, then filling with NA in a new dataframe.
+###
+
+# Ordering data by date/time
+data.ordered<-met[order(met$Timestamp, decreasing = FALSE ),]
+
+data.ordered[1,1:5]
+data.ordered[nrow(data.ordered),1:5]
+
+# Generating new dataframe and gapfilling with NA
+ts<-met
+# ts<-data.ordered
+
+#to estimate necessary parameters to generate the new empty dataframe with complete rows 
+beginning<-as.numeric(ts$Timestamp[1])      # Finding number representing the first data of our time series
+as.POSIXct(beginning,origin="1970-01-01 00:00:00",tz="Etc/GMT+6") # to confirm that the beginning is the right one
+ts$Timestamp[1]
+
+# Ystart<-as.integer(as.character(ts[1,ncol(ts)], "%Y")) # Starting year
+# Yend<-as.integer(as.character(ts[nrow(ts),ncol(ts)], "%Y")) # End  year
+# Dstart<-as.POSIXlt(ts[1,ncol(ts)])$yday # Starting date
+# Dend<-as.POSIXlt(ts[nrow(ts),ncol(ts)])$yday+1 # End date
+
+Ndays <- as.numeric((difftime(ts$Timestamp[nrow(ts)],ts$Timestamp[1], "Etc/GMT+6",
+                              units = c("days"))), units="days")
+
+Tsteps<-beginning+seq(from=0,to=((Ndays)*(60*60*24)),by=(30*60)) # 30 minute steps in seconds from the beginning date to Ndays +1 (to ensure all measured data are included in the new file)
+DATE<-as.POSIXct(Tsteps,origin="1970-01-01 00:00:00",tz="Etc/GMT+6") # Turning steps back into dates
+
+# CHECK start and end times between the two files are equal.
+DATE[1] == ts$Timestamp[1]
+DATE[length(DATE)] == ts$Timestamp[length(ts$Timestamp)]
+
+#GENERATING A NEW DATA FRAME WITH CONTINUOUS TIME STEPS and data from THE ORIGINAL ONE
+cont.DS<-as.data.frame(DATE)
+cont.DS[,c("DATE",names(ts)[1:length(names(ts))])]<-NA # changed from length(names(ts))-1 to keep last column
+cont.DS$DATE<-DATE
+
+#FILLING THE NEW DATAFRAME WITH DATA FROM THE ORIGINAL DATA FRAME 
+for(i in 2:ncol(cont.DS)){  
+  cont.DS[,i]<-ts[pmatch(cont.DS$DATE,ts$Timestamp),i-1]  
+  #pmatch look for the observation rows when time columns of both (old and new) dataframes match
+} 
+
+# Adding local time
+
+date_loca <- ymd_hms(cont.DS$DATE, tz="America/Chicago")
+date_local<-as.POSIXlt(date_loca,tz="America/Chicago")
+
+for (i in 1:nrow(cont.DS)){
+  cont.DS$Year_local[i]<-as.integer(as.character(date_local[i],"%Y"))
+  cont.DS$jday_local[i]<-as.POSIXlt(date_local[i])$yday+1
+  cont.DS$month_local[i]<-as.numeric(format(date_local[i],"%m"))
+  cont.DS$hour_local[i]<-as.integer(as.character(date_local[i],"%H"))
+  cont.DS$min_local[i]<-sprintf("%02s",as.integer(as.character(date_local[i],"%M")))  #sprintf function converts 0 in 00 to be pasted with hour to generate local time
+  cont.DS$time_local[i]<-paste(cont.DS$hour_local[i],cont.DS$min_local[i],sep=":")
+  day_portion<-ifelse(cont.DS$min_local[i]=="00",as.numeric(cont.DS$hour_local[i]),as.numeric(cont.DS$hour_local[i])+0.5)
+  cont.DS$DOY_local[i]<-cont.DS$jday_local[i]+(day_portion*2*0.02)
+}
+
+# Replacing -9999 by NA
+cont.DS[cont.DS == -9999] <- NA
+
+met <- cont.DS
+
+met <- met[pmatch(Data_QAQC$DATE, met$DATE),] # trim to dates of flux file
+
+start_met <- min(which(!is.na(met$Timestamp)))
+end_met <- max(which(!is.na(met$Timestamp)))
+met <- met[start_met:end_met,]
+# met <- met[!is.na(met$Tsoil_mean),]
+
+# fill net radiation forward (assuming only every other half hour is missing)
+met <- met %>%
+  fill(NR)
+
+# gapfilling 10-18-22 11:30 and 12:00
+na_idx = which(is.na(met$DOY_END))
+for (idx in na_idx){
+  met$DOY_END[idx] <- met$DOY_END[idx-1] + 1/48
+}
+
+Data_QAQC <- Data_QAQC[pmatch(met$DATE, Data_QAQC$DATE),]
+
+#Match met and flux time series
+met$DATE <- as.POSIXct(met$DATE, Origin = "1970-01-01 00:00:00", tz = "Etc/GMT+6")
+```
+
+### Met data
+```{r Plot met data, echo=FALSE}
+# Eddypro biomet variable reference list: https://www.licor.com/env/support/EddyPro/topics/biomet-data-format.html, https://www.licor.com/env/support/Biomet-System/topics/viewing-logged-data.html
+plot_ly(data = met, x = ~DATE, y = ~Tsoil_mean, type = 'scatter', mode = 'lines') %>% 
+  layout(title = 'Tsoil_mean') %>%  
+  toWebGL()
+
+plot_ly(data = met, x = ~DATE, y = ~SWC_mean, type = 'scatter', mode = 'lines') %>% 
+  layout(title = 'SWC_mean') %>%  
+  toWebGL()
+
+```
+
+```{r Prepare data for ustar filtering using REddyProc, echo=FALSE, include=FALSE}
+Data_QAQC$DATE[1]
+met$DATE[1]
+
+Data_QAQC$obs<-c(1:nrow(Data_QAQC))
+met$obs1 <- c(1:nrow(met)) #Testing because 'obs' column doesn't start at 1 for some reason
+
+start_date<-Data_QAQC$DATE[1]
+met[nrow(met),1]
+
+if (Data_QAQC$DATE[nrow(Data_QAQC)]>met[nrow(met),1]) { end_date<-met[nrow(met),1] 
+}else{
+  end_date<-Data_QAQC$DATE[nrow(Data_QAQC)]
+}
+
+start_date  #start of matching period
+end_date    #end of matching period
+
+F_start<-Data_QAQC[Data_QAQC$DATE==start_date,match('obs',names(Data_QAQC))] 
+F_end<-Data_QAQC[Data_QAQC$DATE==end_date,match('obs',names(Data_QAQC))]
+
+# M_start<-met[met$date==start_date,match('obs1',names(met))] #TEST
+# M_end<-met[met$date==end_date,match('obs1',names(met))] #TEST
+
+start_bool <- met$DATE==start_date
+end_bool <- met$DATE == end_date
+
+M_start<-met[which(start_bool==TRUE),match('obs1',names(met))] #TEST
+M_end<-met[which(end_bool==TRUE),match('obs1',names(met))] #TEST
+
+M_end-M_start==F_end-F_start   #If everything goes well this should be TRUE 
+
+# # Create output file to use in REddyProc for ustar filtering
+output <- cbind(met[M_start:M_end,match(c('year','DOY_END','hour','TA_EP','SW_IN_POT'),names(met))], Data_QAQC[F_start:F_end,match(c('co2_flux','u.','wind_dir'),names(Data_QAQC))])
+
+# rounding DOY down
+output$DOY_END <- floor(output$DOY_END)
+
+
+# Reorder & rename columns
+output <- output[c("year","DOY_END", "hour","co2_flux","SW_IN_POT","TA_EP","u.","wind_dir")]
+names_output<-c('Year','DoY','Hour','NEE','Rg','Tair','Ustar',"Wind_dir")
+names(output)<-names_output
+  
+#Adding the units row
+UNITS<-list('-','-','-','umol_m-2_s-1','Wm-2','degC','ms-1','ms-1')
+
+output <- rbind(UNITS,output)
+
+#Transforming missing values in -9999:
+output[is.na(output)]<--9999
+
+#Saving the file
+write.table(output, file = paste('/home/otto/data/atmos-flux-data/processed/REddyProc_input/for_ustar_filtering_', Sys.Date(), '.txt', sep=''), 
+            row.names=FALSE,sep='\t') 
+```
+
+```{r Ustar filtering in REddyProc, echo=FALSE, warning=FALSE, include=FALSE}
+# Load data
+EddyData.F <- fLoadTXTIntoDataframe(paste('/home/otto/data/atmos-flux-data/processed/REddyProc_input/for_ustar_filtering_', Sys.Date(), '.txt', sep=''))
+# EddyData.F <- fLoadTXTIntoDataframe(paste('/home/otto/data/atmos-flux-data/processed/REddyProc_input/for_ustar_filtering_2023-03-28.txt', sep=''))
+# EddyData.F <- read.csv('./processed/ATMOS_L1.csv')
+
+
+
+#Gapfill year and hour NA's
+na_idx = which(is.na(EddyData.F$Hour) | is.na(EddyData.F$DoY))
+
+for (idx in na_idx){
+  previous_hour = EddyData.F$Hour[idx-1]
+  previous_day = EddyData.F$DoY[idx-1]
+  previous_year = EddyData.F$Year[idx-1]
+  # Stepping into missing hour for EddyData.F and met
+  if (previous_hour != 23.5) {
+    EddyData.F$Hour[idx] <- previous_hour + 0.5
+    # met$hour[idx] <- met$hour[idx-1] +0.5
+  } else{
+    EddyData.F$Hour[idx] <- 0
+    # met$hour[idx] <- 0
+  }
+  # Stepping into missing day
+  if (previous_hour == 23.5 & previous_day == 365) {
+    EddyData.F$DoY[idx] <- 1
+    # met$DOY[idx] <- 1
+  } else if (previous_hour == 23.5 & previous_day != 365) {
+    EddyData.F$DoY[idx] <- previous_day + 1
+    # met$DOY[idx] <- met$DOY[idx-1] + 0.0208
+  } else if (previous_hour < 23.5) {
+    EddyData.F$DoY[idx] <- previous_day
+    # met$DOY[idx] <- met$DOY[idx-1] + 0.0208
+  }
+  # Stepping into missing year
+  if (previous_hour == 23.5 & previous_day == 365) {
+    EddyData.F$Year[idx] <- previous_year + 1
+    # met$year[idx] <- met$year[idx-1] + 1
+  } else {
+    EddyData.F$Year[idx] <- previous_year
+    # met$year[idx] <- met$year[idx-1]
+  }
+}
+
+# if(typeof(EddyData1.F$Year)=='integer'){EddyData1.F$Year <- as.numeric(EddyData1.F$Year)}
+
+# Add time stamp in POSIX time format
+EddyDataWithPosix.F <- fConvertTimeToPosix(EddyData.F, TFormat = 'YDH',Year = 'Year',Day = 'DoY',Hour = 'Hour') # Year.s, Day.s, Hour.s deprecated
+
+EddyProc.C <- sEddyProc$new('ATMOS', EddyDataWithPosix.F,
+                            c("NEE","Rg","Tair","Ustar"))
+
+# Single ustar threshold estimate
+uStarTh <- EddyProc.C$sEstUstarThreshold()$uStarTh
+
+# ustar threshold decision: separate for each individual year
+threshold <- uStarTh %>% filter(aggregationMode == "year")
+threshold <- threshold[, c(2,4)]
+years <- threshold[, 1]
+nyears <- length(years)
+
+Data_QAQC$ustar_thr <- rep(0, nrow(Data_QAQC))
+for (i in 1:nyears){
+  Data_QAQC$ustar_thr[year(Data_QAQC$DATE) == years[i]] <- threshold[i, 2]
+}
+``` 
+
+### uStar Filtering
+```{r Plot ustar threshold, echo=FALSE}
+plot_ly(data = Data_QAQC, x = ~DATE, y = ~ustar_thr, type = 'scatter', mode = 'lines') %>% 
+  layout(title = 'ustar threshold') %>%  
+  toWebGL()
+```
+
+```{r Create bad ustar flag, echo=FALSE, warning=FALSE}
+# Data_QAQC$badustar <- ifelse(abs(input$u.) < Data_QAQC$ustar_thr | input$u. > ustar_max,1,0)
+Data_QAQC$badustar <- ifelse(abs(Data_QAQC$u.) < Data_QAQC$ustar_thr | Data_QAQC$u. > ustar_max,1,0)
+
+plot_ly(data = Data_QAQC, x = ~DATE, y = ~u., name = 'original', type = 'scatter', mode = 'lines') %>%
+  add_trace(data = Data_QAQC, x = ~DATE[badustar == 1], y = ~u.[badustar == 1], name = 'removed', mode = 'markers') %>% 
+  layout(title = 'ustar, removed vs retained') %>%  
+  toWebGL() 
+```
+
+```{r Now filter everybody - ADD WIND DIRECTION FILTER! & STORAGE TERMS, echo=FALSE, warning=FALSE}
+Data_QAQC$badflux = Data_QAQC$badustar | Data_QAQC$badt | Data_QAQC$badrot | Data_QAQC$badwindffp
+Data_QAQC$L[Data_QAQC$badflux == 1]  <- NA
+Data_QAQC$X.z.d..L[Data_QAQC$badflux == 1]  <- NA
+Data_QAQC$co2_flux[Data_QAQC$badflux == 1]  <- NA
+Data_QAQC$ch4_flux[Data_QAQC$badflux == 1]  <- NA
+Data_QAQC$h2o_flux[Data_QAQC$badflux == 1]  <- NA
+Data_QAQC$ET[Data_QAQC$badflux == 1]  <- NA
+Data_QAQC$LE[Data_QAQC$badflux == 1]  <- NA
+Data_QAQC$H[Data_QAQC$badflux == 1]  <- NA
+
+# Filter momentum fluxes for bad rotation angle only
+Data_QAQC$Tau[Data_QAQC$badrot] <- NA
+
+# Bad water fluxes
+Data_QAQC$h2o_flux[Data_QAQC$badq == 1] <- NA
+Data_QAQC$LE[Data_QAQC$badq == 1] <- NA
+Data_QAQC$ET[Data_QAQC$badq == 1] <- NA
+
+# Bad CO2 fluxes
+Data_QAQC$co2_flux[Data_QAQC$badc == 1] <- NA
+
+# Bad CH4 fluxes
+Data_QAQC$ch4_flux[Data_QAQC$badm == 1]  <- NA
+
+# Bad wind direction - added 14/12/20 M.Nyberg
+Data_QAQC$wind_dir[Data_QAQC$badwind == 1]  <- NA
+
+# Bad Monin-Obukhov Length - added 13/08/21 D.Ng
+Data_QAQC$L[Data_QAQC$badL == 1]  <- NA
+```
+
+### L2 fluxes
+```{r Plot L2 fluxes, echo=FALSE, warning=FALSE}
+# Turbulence
+
+# Add WD eventually
+plot_ly(data = input, x = ~DATE, y = ~u., name = 'original', type = 'scatter', mode = 'line') %>%
+  add_trace(data = Data_QAQC, x = ~DATE[badustar == 1], y = ~u.[badustar == 1], name = 'filtered', mode = 'markers') %>% 
+  layout(title = 'ustar, filtered and unfiltered') %>%  
+  toWebGL()
+
+plot_ly(data = input, x = ~DATE, y = ~X.z.d..L, name = 'original', type = 'scatter', mode = 'line') %>%
+  add_trace(data = Data_QAQC, x = ~DATE, y = ~X.z.d..L, name = 'retained', mode = 'line') %>%
+  layout(yaxis = list(range = c(-20, 20))) %>% 
+  layout(title = 'z/L retained') %>%  
+  toWebGL()
+
+# Fluxes
+plot_ly(data = input, x = ~DATE, y = ~H, name = 'original', type = 'scatter', mode = 'markers', marker = list(size = 3)) %>%
+  add_trace(data = Data_QAQC, x = ~DATE, y = ~H, name = 'retained', mode = 'markers') %>% 
+  layout(title = 'H retained') %>%  
+  toWebGL()
+
+plot_ly(data = input, x = ~DATE, y = ~LE, name = 'original', type = 'scatter', mode = 'markers', marker = list(size = 3)) %>%
+  add_trace(data = Data_QAQC, x = ~DATE, y = ~LE, name = 'retained', mode = 'markers') %>% 
+  layout(title = 'LE retained') %>%    toWebGL()
+
+plot_ly(data = input, x = ~DATE, y = ~co2_flux, name = 'original', type = 'scatter', mode = 'markers', marker = list(size = 3)) %>%
+  add_trace(data = Data_QAQC, x = ~DATE, y = ~co2_flux, name = 'retained', mode = 'markers') %>%
+  layout(yaxis = list(range = c()),
+         title = 'CO2 retained') %>% 
+  toWebGL()
+
+plot_ly(data = input, x = ~DATE, y = ~ch4_flux*1000, name = 'original', type = 'scatter', mode = 'markers', marker = list(size = 3)) %>%
+  add_trace(data = Data_QAQC, x = ~DATE, y = ~ch4_flux*1000, name = 'retained', mode = 'markers') %>%
+  layout(yaxis = list(range = c(-300, 800)),
+         title = 'CH4 retained') %>% 
+  toWebGL()
+
+plot_ly(data = input, x = ~DATE, y = ~rssi_77_mean, name = 'original', type = 'scatter', mode = 'markers', marker = list(size = 3)) %>%
+ # layout(yaxis = list(range = c(-300, 800))) %>% 
+  layout(title = 'CH4 signal strength') %>%  
+  toWebGL()
+
+# Bad rotatoion angle
+plot_ly(data = input, x = ~DATE, y = ~pitch, name = 'original', type = 'scatter', mode = 'line') %>%
+  add_trace(data = Data_QAQC, x = ~DATE[badrot == 1], y = ~pitch[badrot == 1], name = 'filtered', mode = 'markers') %>% 
+  layout(title = 'rotation angle') %>%  
+  toWebGL()
+
+# Wind direction - added 14/12/2020 - M.Nyberg - not sure if this has worked but there are NAs in the Data_QAQC file
+plot_ly(data = input, x = ~DATE, y = ~wind_dir, name = 'original', type = 'scatter', mode = 'line') %>%
+  add_trace(data = Data_QAQC, x = ~DATE[(badwind == 1 | badwindffp == 1)], y = ~wind_dir[(badwind == 1 | badwindffp == 1)], name = 'filtered', mode = 'markers') %>% 
+  layout(title = 'wind direction excluded') %>%  
+  toWebGL()
+```
+
+### Wind Direction Filtering
+```{r Plot wind direction filtering, echo=FALSE, warning=FALSE}
+
+plot_ly(data = input, x = ~DATE, y = ~h2o_flux, name = 'original', type = 'scatter', mode = 'markers', colors = c('yellow', 'red')) %>%
+  add_trace(data = Data_QAQC, x = ~DATE[!(badwindffp==1)], y = ~h2o_flux[!(badwindffp==1)], name = 'prairie', mode = 'markers') %>%
+  add_trace(data = Data_QAQC, x = ~DATE[badwindffp==1], y = ~h2o_flux[badwindffp==1], name = 'forest', mode = 'markers') %>%
+  # add_trace(data = Data_QAQC, x = ~DATE, y = ~h2o_flux, name = 'h2o_flux', mode = 'markers', color = ~as.factor(wind_dir_ffp)) %>% 
+  layout(yaxis = list(range = c(h2o_flux_min, h2o_flux_max)),
+         title = 'H2O wind direction filtering') %>%
+  toWebGL()
+
+plot_ly(data = input, x = ~DATE, y = ~co2_flux, name = 'original', type = 'scatter', mode = 'markers', colors = c('yellow', 'red')) %>%
+  add_trace(data = Data_QAQC, x = ~DATE[!(badwindffp==1)], y = ~co2_flux[!(badwindffp==1)], name = 'prairie', mode = 'markers') %>%
+  add_trace(data = Data_QAQC, x = ~DATE[badwindffp==1], y = ~co2_flux[badwindffp==1], name = 'forest', mode = 'markers') %>%
+  # add_trace(data = Data_QAQC, x = ~DATE, y = ~co2_flux, name = 'co2_flux', mode = 'markers', color = ~as.factor(wind_dir_ffp)) %>% 
+  layout(yaxis = list(range = c(co2_flux_min, co2_flux_max)),
+         title = 'CO2 wind direction filtering') %>%
+  toWebGL()
+
+plot_ly(data = input, x = ~DATE, y = ~ch4_flux, name = 'original', type = 'scatter', mode = 'markers', colors = c('pink', 'green')) %>%
+  add_trace(data = Data_QAQC, x = ~DATE[!(badwindffp==1)], y = ~ch4_flux[!(badwindffp==1)], name = 'prairie', mode = 'markers') %>%
+  add_trace(data = Data_QAQC, x = ~DATE[badwindffp==1], y = ~ch4_flux[badwindffp==1], name = 'forest', mode = 'markers') %>%
+  layout(title = 'CH4 wind direction filtering') %>%
+  toWebGL()
+```
+
+### Variance Filtering
+```{r Plot variances, echo=FALSE, warning=FALSE}
+# Variances
+plot_ly(data = input, x = ~DATE, y = ~ts_var, name = 'original', type = 'scatter', mode = 'line') %>%
+  add_trace(data = Data_QAQC, x = ~DATE[ts_var > ts_var_max], y = ~ts_var[ts_var > ts_var_max], name = 'filtered', mode = 'markers') %>%
+  layout(title = 'T variance') %>%
+  toWebGL()
+
+# plot_ly(data = input, x = ~DATE, y = ~ts_var, name = 'original', type = 'histogram', mode = 'line') %>%
+#   add_trace(data = Data_QAQC, x = ~DATE[ts_var > ts_var_max], y = ~ts_var[ts_var > ts_var_max], name = 'filtered', mode = 'markers') %>%
+#   layout(title = 'T variance') %>%
+#   toWebGL()
+
+plot_ly(data = input, x = ~DATE, y = ~h2o_var, name = 'original', type = 'scatter', mode = 'line') %>%
+  add_trace(data = Data_QAQC, x = ~DATE[h2o_var > h2o_var_max], y = ~h2o_var[h2o_var > h2o_var_max], name = 'filtered', mode = 'markers') %>% 
+  layout(title = 'h2o variance') %>%  
+  toWebGL()
+
+# plot_ly(data = input, x = ~DATE, y = ~h2o_var, name = 'original', type = 'histogram', mode = 'line') %>%
+#   add_trace(data = Data_QAQC, x = ~DATE[h2o_var > h2o_var_max], y = ~h2o_var[h2o_var > h2o_var_max], name = 'filtered', mode = 'markers') %>% 
+#   layout(title = 'h2o variance') %>%  
+#   toWebGL()
+
+plot_ly(data = input, x = ~DATE, y = ~co2_var, name = 'original', type = 'scatter', mode = 'line') %>%
+  add_trace(data = Data_QAQC, x = ~DATE[co2_var > co2_var_max], y = ~co2_var[co2_var > co2_var_max], name = 'filtered', mode = 'markers') %>%
+  layout(title = 'co2 variance') %>% 
+  toWebGL()
+
+# plot_ly(data = input, x = ~DATE, y = ~co2_var, name = 'original', type = 'histogram', mode = 'line') %>%
+#   add_trace(data = Data_QAQC, x = ~DATE[co2_var > co2_var_max], y = ~co2_var[co2_var > co2_var_max], name = 'filtered', mode = 'markers') %>%
+#   layout(title = 'co2 variance') %>% 
+#   toWebGL()
+
+plot_ly(data = input, x = ~DATE, y = ~ch4_var, name = 'original', type = 'scatter', mode = 'line') %>%
+  add_trace(data = Data_QAQC, x = ~DATE[ch4_var > ch4_var_max], y = ~ch4_var[ch4_var > ch4_var_max], name = 'filtered', mode = 'markers') %>%
+  layout(yaxis = list(range = c(-0.0001,0.0001)),
+         title = 'ch4 variance') %>% 
+  toWebGL()
+
+# plot_ly(data = input, x = ~DATE, y = ~ch4_var, name = 'original', type = 'histogram', mode = 'line') %>%
+#   add_trace(data = Data_QAQC, x = ~DATE[ch4_var > ch4_var_max], y = ~ch4_var[ch4_var > ch4_var_max], name = 'filtered', mode = 'markers') %>%
+#   layout(yaxis = list(range = c(-0.0001,0.0001)),
+#          title = 'ch4 variance') %>% 
+#   toWebGL()
+```
+
+```{r Plot energy balance closure, echo=FALSE, warning=FALSE}
+# Ebal_denominator <- met$NR[M_start:M_end]-met$G[M_start:M_end]
+# 
+# Ebal_numerator <- Data_QAQC$H+Data_QAQC$LE
+# 
+# plot(x = Ebal_denominator, y = Ebal_numerator, xlab="Rn-G",ylab="LE+H")
+# 
+# # calculate EB using slope to fit
+# a<-round(coef(lm(Ebal_numerator~Ebal_denominator))[2],digits=2) #coef(lm(y~x))[2] is the slope of the regression
+# b<-round(coef(lm(Ebal_numerator~Ebal_denominator))[1],digits=2)   
+# r2<-round(summary(lm(Ebal_numerator~Ebal_denominator))$ r.squared,digits=2)
+# 
+# lm_eq<-paste0("y=",a,"x",ifelse(b>0,"+",""),b)
+# R2<-bquote(R^2 == .(r2)) 
+# 
+# abline(0,1)
+# abline(lm(Ebal_numerator~Ebal_denominator),col='grey',lty=2)
+# mtext( lm_eq,side=3,line=-2,at=200,cex=0.9)
+# mtext(R2,side=3,line=-3,at=200,cex=0.9)
+# 
+# # Do diurnal approach - applies equal weight to all times of day
+# 
+# # Find index of first day starting at 00:30
+# ind <- which(Data_QAQC$min_local == 30 & Data_QAQC$hour_local == 0)
+# is <- ind[1]
+# 
+# # Find index of last day ending at 00:00
+# ind <- which(Data_QAQC$min_local == 00 & Data_QAQC$hour_local == 0)
+# ie <- ind[length(ind)]
+# 
+# Ebal_numerator_diel <- Ebal_numerator[is:ie]
+# Ebal_denominator_diel <- Ebal_denominator[is:ie]
+# 
+# Ebal_numerator_diel <- t(matrix(Ebal_numerator_diel, 48, length(Ebal_numerator[is:ie])/48))
+# Ebal_denominator_diel <- t(matrix(Ebal_denominator_diel, 48, length(Ebal_numerator[is:ie])/48))
+# 
+# Ebal_numerator_diurn <- colMeans(x = Ebal_numerator_diel, na.rm = TRUE)
+# Ebal_denominator_diurn = colMeans(x = Ebal_denominator_diel, na.rm = TRUE)
+# 
+# # Compute closure
+# Eclosure = sum(Ebal_numerator_diurn)/sum(Ebal_denominator_diurn);
+# mtext(paste('Diel Avg. Closure = ', round(Eclosure,2)),side=3,line=-4,at=200,cex=0.9)
+```
+
+```{r Compute data coverage, echo=FALSE, warning=FALSE}
+Data_coverage = colSums(!is.na(Data_QAQC[c('co2_flux', 'ch4_flux')])) / nrow(Data_QAQC)
+```
+
+```{r Save L2 output, echo=FALSE, warning=FALSE}
+write.csv(Data_QAQC,paste('/home/otto/data/atmos-flux-data/processed/ATMOS_L2_', Sys.Date(), '.csv',sep=''),row.names=FALSE)   
+```
+
+```{r Now export data for gap-filling and partitioning using REddyProc, echo=FALSE, warning=FALSE}
+#Converting units for the right input file format
+met$VPD_hPa <- met$VPD*10
+
+# Create output file to use in REddyProc for ustar filtering - need all soil temp reps?
+output <- cbind(met[,c('year','DOY_END','hour','TA_EP','SW_IN_POT','RH_EP', 'VPD_hPa','Tsoil_mean')], 
+               Data_QAQC[,match(c('co2_flux','ch4_flux','LE','H','u.','wind_dir'),names(Data_QAQC))])
+
+
+# Reorder & rename columns
+
+#01/07/2020 - add reps for soil temp
+output <- output[c("year", "DOY_END", "hour","co2_flux","ch4_flux","LE","H","SW_IN_POT","TA_EP","Tsoil_mean", "RH_EP","VPD_hPa","u.","wind_dir")]
+
+names_output<-c('Year','DoY','Hour','NEE','FCH4','LE','H','Rg','Tair','Tsoil15cm_below','rH','VPD','Ustar','Wind_dir')
+names(output)<-names_output
+
+#Adding the units row
+UNITS<-list('-','-','-','umol_m-2_s-1','umol_m-2_s-1','Wm-2','Wm-2','Wm-2','degC','degC','%','hPa','ms-1','ms-1')
+
+output <- rbind(UNITS,output)
+
+#Transforming missing values in -9999:
+output[is.na(output)]<--9999
+
+#Saving biomet file:
+write.csv(met,paste('/home/otto/data/atmos-flux-data/processed/Gapfilled_biomet_', Sys.Date(), '.csv',sep=''),row.names=FALSE)   
+#Saving the file:
+write.table(output, file = paste('/home/otto/data/atmos-flux-data/processed/REddyProc_input/for_gap_filling_partitioning_ATMOS_',
+                                 Sys.Date(), file_suffix, '.txt', sep=''), 
+            row.names=FALSE,sep='\t')   
+```
