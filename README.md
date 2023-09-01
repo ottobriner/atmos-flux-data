@@ -10,10 +10,10 @@ Scripts 0-3 perform flux post processing on EddyPro outputs:
 - MDS gap-filling
 - NEE partitioning to GPP/Reco
 
-R scripts based on code from Micrometeorology Lab at UBC <br/>
+R scripts based on code from Micrometeorology Lab at University of British Columbia <br/>
 https://github.com/dng55/Manitoba_Flux_Processing/
 
-4.methanegapfill (Irvin et al. 2021)
+4.methanegapfill (Irvin et al. 2021):
 - predictor set selection
 - prepares machine learning algorithms
 - gap-fills methane flux data
