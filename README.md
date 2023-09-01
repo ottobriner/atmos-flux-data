@@ -1,6 +1,6 @@
 # ATMOS Flux Data
 
-This is a collection of tools for eddy covariance flux processing at the ATMOS prairie site at Argonne National Laboratory.
+This is a collection of tools for eddy covariance flux processing at the ATMOS prairie site at Argonne National Laboratory, developed for ATMOS and the McNicol Lab at University of Illinois Chicago.
 
 Raw flux processing is done in EddyPro.
 
