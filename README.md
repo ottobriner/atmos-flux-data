@@ -10,7 +10,7 @@ Scripts 0-3 perform flux post processing on EddyPro outputs:
 - MDS gap-filling
 - NEE partitioning to GPP/Reco
 
-R scripts based on code from Micrometeorology Lab at UBC
+R scripts based on code from Micrometeorology Lab at UBC <br/>
 https://github.com/dng55/Manitoba_Flux_Processing/
 
 4.methanegapfill (Irvin et al. 2021)
@@ -25,7 +25,7 @@ atmos-FFP:
 
 atmos-spatial matches footprint-weighed flux maps with satellite imagery (currently National Agriculture Imagery Program via Google Earth Engine)
 
-<br>
+<br/>
 
 Irvin, Jeremy, Sharon Zhou, Gavin McNicol, Fred Lu, Vincent Liu, Etienne Fluet-Chouinard, Zutao Ouyang et al. "Gap-filling eddy covariance methane fluxes: Comparison of machine learning model predictions and uncertainties at FLUXNET-CH4 wetlands." _Agricultural and forest meteorology_ 308 (2021): 108528.
 
