@@ -3,7 +3,7 @@ import numpy as np
 import geopandas as gpd
 from shapely import Point, LineString
 from geographiclib.geodesic import Geodesic
-
+from matplotlib import pyplot as plt
 # import pywt
 from functools import partial, reduce
 # from sklearn.linear_model import LinearRegression
@@ -17,6 +17,19 @@ def read_l3(filepath, datecol='DATE'):
      )
     df.index = df.index.set_names(None)
     return df
+
+def plot_diag(df_in):
+    df = (
+        df_in.replace(-9999, np.nan)
+         )
+    print(df.describe())
+    axs = df.plot(subplots=True)
+    # print([ax.get_ylim() for ax in axs])
+    for n, col in enumerate(df.columns):
+        axs[n].fill_between(df.index, axs[n].get_ylim()[0], axs[n].get_ylim()[1], where=df[col].isna(), 
+                            facecolor='red', alpha=0.3)
+    plt.show()
+    return axs
 
 def save_ameriflux(filepath, save_as=None, save_file=True):
     
