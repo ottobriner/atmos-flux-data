@@ -94,8 +94,8 @@ def save_ameriflux(filepath, save_as=None, save_file=True):
                   SCH4 = lambda x: x['SCH4'] * 1000, # umol s-1 m-2 to nmol s-1 m-2
                   PA = lambda x: x['PA'] * 0.001, # Pa to kPa
                   VPD = lambda x: x['VPD'] * 0.01, # Pa to hPa
-                  TA = lambda x: x['TA'], # K to degC
-                  T_SONIC = lambda x: x['T_SONIC'], # K to degC
+                  TA = lambda x: x['TA'] - 273.15, # K to degC
+                  T_SONIC = lambda x: x['T_SONIC'] - 273.15, # K to degC
                   Tsoil_75 = lambda x: np.full(len(x), np.nan), # dummy variable for missing soil sensor
                   Tsoil_76 = lambda x: np.full(len(x), np.nan), # dummy variable for missing soil sensor
                   SWC_75 = lambda x: np.full(len(x), np.nan), # dummy variable for missing soil sensor
@@ -128,26 +128,13 @@ def save_ameriflux(filepath, save_as=None, save_file=True):
     
     gridcols = dict(zip(gridcols_i.keys(), [df.columns[gridcols_i[key]] for key in gridcols_i.keys()]))
     
-    # df = df[list(df.columns.difference(gridcols['TS'], sort=False)) + gridcols['TS']]
-    df = df[[col for col in df.columns if col not in gridcols['TS']] + sorted(gridcols['TS'])] 
-    print(df.columns)
-    print([sorted(gridcols[key]) for key in gridcols.keys()])
-    # gridcols_sorted = dict(zip(gridcols.keys(), [sorted(gridcols[key]) for key in gridcols.keys()]))
-    # print(df.columns[:gridcols_sorted['TS'][0]])
-    # print(df.columns[gridcols_sorted['TS'][-1]:])
-    # # print(sorted(gridcols['TS']))
-
+    # df = df[[col for col in df.columns if col not in gridcols['TS']] + sorted(gridcols['TS']) + sorted(gridcols['SWC'])] 
+    
     gridcols_new = [[f'{key}_{i+1}_1_1' for i in range(len(gridcols[key]))] for key in gridcols.keys()]
     gridcols_new = dict(zip(gridcols.keys(), gridcols_new))
-    # new_grid_cols_TS = [f'TS_{i+1}_1_1' for i in range(len(gridcols_i['TS']))]
-    print(len(gridcols_new['TS']))
-    print(len(gridcols['TS']))
-    print(gridcols_new)
-    # df.columns[gridcols_i['TS']] = new_grid_cols_TS
-    # df.columns = df.columns.replace(df.columns[gridcols_i['TS']], new_grid_cols_TS)
+    
     for key in gridcols_new.keys():
         df = df.rename(columns=dict(zip(sorted(gridcols[key]), gridcols_new[key])))
-    # df.loc[:, grid_cols_TS] = df.loc[:, grid_cols_TS].rename(columns=dict(zip(grid_cols_TS, new_grid_cols_TS)))
     
     # rename Tsoil grid and deep sensors
     df = df.rename(columns={
@@ -159,11 +146,19 @@ def save_ameriflux(filepath, save_as=None, save_file=True):
     
     # rename Reco and Tsoil
     df.columns = df.columns.str.replace('Reco_', 'RECO_')
-    df.columns = df.columns.str.replace('Tsoil', 'TS')
+    # df.columns = df.columns.str.replace('Tsoil', 'TS')
     
     cols_to_move = ['TIMESTAMP_START', 'TIMESTAMP_END']
     df = df[ cols_to_move + [ col for col in df.columns if col not in cols_to_move ] ]
+    # print(df.loc[df.isna()])
+    # print(df.query("value.isna()"))
+    # df = df.astype('object')
     df = df.replace(np.nan, np.int64(-9999)) # set np.nan to -9999 after all unit conversions for FLUXNET formatting
+    # df = df.replace(np.nan, '-9999') # set np.nan to -9999 after all unit conversions for FLUXNET formatting
+    # df = df.where(df != -9999, df.astype(pd.Int64Dtype(), errors='ignore'))
+    # df = df.where(df != -9999, 'nan')
+    # df = df.replace('nan', np.int64(-9999)) # set np.nan to -9999 after all unit conversions for FLUXNET formatting
+    # df[df.isna()] = df[df.isna()].replace(np.nan, np.int64(-9999)).astype('int')
     # df[df.columns.isna().any()] = df.fillna(np.int64(-9999))
     
     if save_file: 
