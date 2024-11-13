@@ -96,6 +96,10 @@ def save_ameriflux(filepath, save_as=None, save_file=True):
                   VPD = lambda x: x['VPD'] * 0.01, # Pa to hPa
                   TA = lambda x: x['TA'], # K to degC
                   T_SONIC = lambda x: x['T_SONIC'], # K to degC
+                  Tsoil_75 = lambda x: np.full(len(x), np.nan), # dummy variable for missing soil sensor
+                  Tsoil_76 = lambda x: np.full(len(x), np.nan), # dummy variable for missing soil sensor
+                  SWC_75 = lambda x: np.full(len(x), np.nan), # dummy variable for missing soil sensor
+                  SWC_76 = lambda x: np.full(len(x), np.nan), # dummy variable for missing soil sensor
                   # RH_1 = lambda x: x['RH_1'].mask(x['RH_1']>250, other=np.nan),
                  )
           # drop extra time vars, unknown RH_1, two 30cm and 50cm soil sensors , and secondary soil sensor vars
@@ -104,6 +108,8 @@ def save_ameriflux(filepath, save_as=None, save_file=True):
                   'RH_1',
                   # 'Tsoil_30cm', 'Tsoil_50cm', 'SWC_30cm', 'SWC_50cm', # leaving deeper soil sensors in for now
                   'SWC_rmean', 'SWC_rstd', 'SWC_mean',
+                  'TS10', 'TS10F', # don't know these, can't document them
+                  'TS100', # seems to be completely missing data
                   'Tsoil_rmean', 'Tsoil_rstd', 'Tsoil_rmean_pre', 'Tsoil_rstd_pre', 'Tsoil_mean',
           ], errors='ignore')
           # .replace(to_replace=np.nan, value=np.int64(-9999)) # set np.nan to -9999 for FLUXNET formatting
@@ -111,8 +117,47 @@ def save_ameriflux(filepath, save_as=None, save_file=True):
          )
     df.index = df.index.set_names(None)
     # print(df.loc[:, df.columns.str.contains('SWC_')])
-    df[df.columns[df.columns.str.contains('SWC_')]] = df[df.columns[df.columns.str.contains('SWC_')]] * 100 # convert SWC to percent 0-100
+
+    # convert SWC to percent 0-100
+    df[df.columns[df.columns.str.contains('SWC_')]] = df[df.columns[df.columns.str.contains('SWC_')]] * 100 
+
+    gridcols_i = {
+        'TS': df.columns.str.contains('Tsoil_') & ~df.columns.str.contains('cm'),
+        'SWC': df.columns.str.contains('SWC_') & ~df.columns.str.contains('cm'),
+    }
     
+    gridcols = dict(zip(gridcols_i.keys(), [df.columns[gridcols_i[key]] for key in gridcols_i.keys()]))
+    
+    # df = df[list(df.columns.difference(gridcols['TS'], sort=False)) + gridcols['TS']]
+    df = df[[col for col in df.columns if col not in gridcols['TS']] + sorted(gridcols['TS'])] 
+    print(df.columns)
+    print([sorted(gridcols[key]) for key in gridcols.keys()])
+    # gridcols_sorted = dict(zip(gridcols.keys(), [sorted(gridcols[key]) for key in gridcols.keys()]))
+    # print(df.columns[:gridcols_sorted['TS'][0]])
+    # print(df.columns[gridcols_sorted['TS'][-1]:])
+    # # print(sorted(gridcols['TS']))
+
+    gridcols_new = [[f'{key}_{i+1}_1_1' for i in range(len(gridcols[key]))] for key in gridcols.keys()]
+    gridcols_new = dict(zip(gridcols.keys(), gridcols_new))
+    # new_grid_cols_TS = [f'TS_{i+1}_1_1' for i in range(len(gridcols_i['TS']))]
+    print(len(gridcols_new['TS']))
+    print(len(gridcols['TS']))
+    print(gridcols_new)
+    # df.columns[gridcols_i['TS']] = new_grid_cols_TS
+    # df.columns = df.columns.replace(df.columns[gridcols_i['TS']], new_grid_cols_TS)
+    for key in gridcols_new.keys():
+        df = df.rename(columns=dict(zip(sorted(gridcols[key]), gridcols_new[key])))
+    # df.loc[:, grid_cols_TS] = df.loc[:, grid_cols_TS].rename(columns=dict(zip(grid_cols_TS, new_grid_cols_TS)))
+    
+    # rename Tsoil grid and deep sensors
+    df = df.rename(columns={
+        'Tsoil_30cm': f'TS_65_2_1',
+        'Tsoil_50cm': f'TS_65_3_1',
+        'SWC_30cm': f'SWC_65_2_1',
+        'SWC_50cm': f'SWC_65_3_1',
+        })
+    
+    # rename Reco and Tsoil
     df.columns = df.columns.str.replace('Reco_', 'RECO_')
     df.columns = df.columns.str.replace('Tsoil', 'TS')
     
