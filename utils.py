@@ -8,6 +8,7 @@ from matplotlib import pyplot as plt
 from functools import partial, reduce
 # from sklearn.linear_model import LinearRegression
 # from sklearn.metrics import mean_squared_error, r2_score
+pd.set_option('future.no_silent_downcasting', True)
 
 def read_l3(filepath, datecol='DATE'):
     df = (pd.read_csv(filepath, header=0, low_memory=False)
@@ -32,19 +33,34 @@ def plot_diag(df_in):
     return axs
 
 def save_ameriflux(filepath, save_as=None, save_file=True):
-    
+    '''
+    NEED TO:
+    - check all REddyProc names vs AmeriFlux variables
+    - switch FCH4_F#_RF to FCH4_F_RF_#
+    - replace all _f with _F_MDS
+    - copy NEE_{} to FC_{}?
+    - fix -9999 formatting as int
+    '''
     if save_as is None:
         save_as = filepath[:-4] + '_fluxnet.csv'
     
+    noU_filepath = r"C:\Users\ottob\data\atmos-flux-data\processed\ATMOS_L3_2024-11-28.csv" # Windows
+    df_noU = (pd.read_csv(noU_filepath, header=0, low_memory=False))
+    fc = df_noU['co2_flux']
+    print(df_noU.columns[df_noU.columns.str.contains('co2_flux')])
+    print(fc)
     df = (pd.read_csv(filepath, header=0, low_memory=False)
+          .assign(FC = fc).drop(columns='co2_flux')
           .replace(-9999, np.nan).replace(99999, np.nan) # set missing to np.nan for unit conversions
           .rename(columns = {
               'co2_mole_fraction': 'CO2', # umol mol-1
               'co2_mixing_ratio': 'CO2_MIXING_RATIO', # umol mol-1
               'ch4_mole_fraction': 'CH4', # umol mol-1 (convert to nmol below)
               'ch4_mixing_ratio': 'CH4_MIXING_RATIO', # umol mol-1 (convert to nmol below)
-              'co2_flux': 'FC', # umol m-2 s-1
+              # 'co2_flux': 'FC', # umol m-2 s-1
               'ch4_flux': 'FCH4', # umol m-2 s-1 (convert to nmol below)
+              'NEE_f': 'FC_F_MDS',
+              'FCH4_f': 'FCH4_F_MDS',
               'h2o_mole_fraction': 'H2O', # mmol mol-1
               'h2o_mixing_ratio': 'H2O_MIXING_RATIO', # mmol mol-1
               'h2o_flux': 'FH2O', # mmol m-2 s-1
@@ -52,6 +68,7 @@ def save_ameriflux(filepath, save_as=None, save_file=True):
               'ch4_strg': 'SCH4', # umol s-1 m-2 (convert to nmol below)
               'H_strg': 'SH', # W m-2
               'LE_strg': 'SLE', # W m-2
+              
               'air_pressure': 'PA', # Pa (convert to kPa below)
               'sonic_temperature': 'T_SONIC', # K (convert to degC below)
               'air_temperature': 'TA', # K (convert to degC below)
@@ -91,6 +108,7 @@ def save_ameriflux(filepath, save_as=None, save_file=True):
                   CH4 = lambda x: x['CH4'] * 1000, # umol mol-1 to nmol mol-1
                   CH4_MIXING_RATIO = lambda x: x['CH4_MIXING_RATIO'] * 1000, # umol mol-1 to nmol mol-1
                   FCH4 = lambda x: x['FCH4'] * 1000, # umol m-2 s-1 to nmol m-2 s-1
+                  FCH4_F_MDS = lambda x: x['FCH4_F_MDS'] * 1000, # umol m-2 s-1 to nmol m-2 s-1
                   SCH4 = lambda x: x['SCH4'] * 1000, # umol s-1 m-2 to nmol s-1 m-2
                   PA = lambda x: x['PA'] * 0.001, # Pa to kPa
                   VPD = lambda x: x['VPD'] * 0.01, # Pa to hPa
@@ -117,7 +135,7 @@ def save_ameriflux(filepath, save_as=None, save_file=True):
          )
     df.index = df.index.set_names(None)
     # print(df.loc[:, df.columns.str.contains('SWC_')])
-
+    
     # convert SWC to percent 0-100
     df[df.columns[df.columns.str.contains('SWC_')]] = df[df.columns[df.columns.str.contains('SWC_')]] * 100 
 
@@ -125,14 +143,10 @@ def save_ameriflux(filepath, save_as=None, save_file=True):
         'TS': df.columns.str.contains('Tsoil_') & ~df.columns.str.contains('cm'),
         'SWC': df.columns.str.contains('SWC_') & ~df.columns.str.contains('cm'),
     }
-    
     gridcols = dict(zip(gridcols_i.keys(), [df.columns[gridcols_i[key]] for key in gridcols_i.keys()]))
-    
     # df = df[[col for col in df.columns if col not in gridcols['TS']] + sorted(gridcols['TS']) + sorted(gridcols['SWC'])] 
-    
     gridcols_new = [[f'{key}_{i+1}_1_1' for i in range(len(gridcols[key]))] for key in gridcols.keys()]
     gridcols_new = dict(zip(gridcols.keys(), gridcols_new))
-    
     for key in gridcols_new.keys():
         df = df.rename(columns=dict(zip(sorted(gridcols[key]), gridcols_new[key])))
     
@@ -147,6 +161,14 @@ def save_ameriflux(filepath, save_as=None, save_file=True):
     # rename Reco and Tsoil
     df.columns = df.columns.str.replace('Reco_', 'RECO_')
     # df.columns = df.columns.str.replace('Tsoil', 'TS')
+    fch4cols = df.columns.str.contains(r'FCH4_F\d+_RF', regex=True)
+    fch4cols = df.columns.str.contains(r'FCH4_F', regex=True)
+    print(df.columns[fch4cols])
+    # df.columns = df.columns.difference(fch4cols) + df.columns[fch4cols].str.replace('FCH4_F', 'FCH4_F_RF_').str.replace('_RF', '')
+    # print(df.columns.str.contains(r'FCH4_F_RF_\d+', regex=True))
+    # for i in range(len(fch4cols)+2, 1):
+    #     print(i)
+    #     df.columns = df.columns.str.replace(f'_F{i}_RF', f'_F_RF_{i}')
     
     cols_to_move = ['TIMESTAMP_START', 'TIMESTAMP_END']
     df = df[ cols_to_move + [ col for col in df.columns if col not in cols_to_move ] ]
@@ -154,24 +176,35 @@ def save_ameriflux(filepath, save_as=None, save_file=True):
     # print(df.query("value.isna()"))
     # df = df.astype('object')
     df = df.replace(np.nan, np.int64(-9999)) # set np.nan to -9999 after all unit conversions for FLUXNET formatting
+    df2 = pd.DataFrame(df, dtype='object')
+    df2 = df2.replace(np.nan, np.int64(-9999))
+    df2 = df2.replace(-9999, np.int64(-9999))
     # df = df.replace(np.nan, '-9999') # set np.nan to -9999 after all unit conversions for FLUXNET formatting
     # df = df.where(df != -9999, df.astype(pd.Int64Dtype(), errors='ignore'))
     # df = df.where(df != -9999, 'nan')
     # df = df.replace('nan', np.int64(-9999)) # set np.nan to -9999 after all unit conversions for FLUXNET formatting
     # df[df.isna()] = df[df.isna()].replace(np.nan, np.int64(-9999)).astype('int')
     # df[df.columns.isna().any()] = df.fillna(np.int64(-9999))
-    
+    # print(df.columns[df.columns.str.contains('FC')])
     if save_file: 
         if save_as is not None:
             df.to_csv(save_as, index = False)
         else:
-            df.to_csv(f'US-AMS_HH_{df['TIMESTAMP_START'].iloc[0]}_{df['TIMESTAMP_START'].iloc[-1]}.csv', index = False)
+            df2.to_csv(f'./output/csv/US-AMS_HH_{df['TIMESTAMP_START'].iloc[0]}_{df['TIMESTAMP_START'].iloc[-1]}.csv', index = False)
 #     df.to_csv(save_as=f'./output/csv/ATMOS_L3_{datetime.now().strftime("%Y-%m-%d")}_fluxnet.csv', index=False)
+    df2.to_csv(f'./output/csv/US-AMS_HH_{df['TIMESTAMP_START'].iloc[0]}_{df['TIMESTAMP_START'].iloc[-1]}.csv', index = False)
     
-    return df
+    return df2
 
-def get_datalogger_locs():
-    '''Returns GeoDataFrame of datalogger locations and tuple of origin (lat, lon)'''
+def get_sensor_grid():
+    '''
+    Returns GeoDataFrame of datalogger locations and tuple of origin (lat, lon)
+    Locations of data loggers are taken from Zentra cloud website manually (can be saved to a csv). 
+    Azimuth of the grid's latitudinal axis is estimated from the logger locations. 
+    We project an 8x8 grid of 12.5m squares, with logger 6 at the center (4,4).
+    Sensor numbers and data loggers read from ATMOS_SoilSensors_layout.xlsx, from Alexis Renchon 
+    (uploaded to Google Drive folder "ATMOS Flux Data")
+    '''
     
     # filepath = '/home/otto/data/atmos-flux-data/input/ATMOS_SoilSensors_layout.xlsx - Sheet1.csv'
     filepath = r"C:\Users\ottob\data\atmos-flux-data\ATMOS_SoilSensors_layout.xlsx - Sheet1.csv"
@@ -206,7 +239,39 @@ def get_datalogger_locs():
     direct = geod.Direct(leftmidpt[0],leftmidpt[1],azi-90,s)
     origin = (direct['lat2'],direct['lon2'])
     print('Origin = ' + str(origin))
-    return dataloggers, origin
+    
+    sensors = pd.read_csv(filepath, usecols=[5, 6, 7, 8, 9, 10, 11], header=0, 
+                          names=['logger', 'serial', 'status', 'port', 'teros_num', 'x', 'y'])
+    
+    cols = ['logger', 'serial', 'status']
+    sensors.loc[:, cols] = sensors.loc[:, cols].ffill()
+    
+    sensors = sensors.sort_values(by=['x','y'])
+    
+    yax = np.array([geod.Direct(origin[0], origin[1], azi+90, s*12.5) for s in range(0, 8)])
+    
+    xax = np.array([geod.Direct(origin[0], origin[1], azi-180, s*12.5) for s in range(0, 8)])
+    
+    sensors.loc[sensors['y']==0, 'lat'] = [xax[x]['lat2'] for x in range(8)]
+    sensors.loc[sensors['y']==0, 'lon'] = [xax[x]['lon2'] for x in range(8)]
+    sensors.loc[sensors['x']==0, 'lat'] = [yax[y]['lat2'] for y in range(8)]
+    sensors.loc[sensors['x']==0, 'lon'] = [yax[y]['lon2'] for y in range(8)]
+    
+    for i in range(1,8):
+        row = np.array([geod.Direct(yax[i]['lat2'], yax[i]['lon2'], azi-180, s*12.5) for s in range(0, 8)])
+        row
+        sensors.loc[sensors['y']==i, 'lat'] = [row[x]['lat2'] for x in range(8)]
+        sensors.loc[sensors['y']==i, 'lon'] = [row[x]['lon2'] for x in range(8)]
+    
+        
+    # sensors.loc[:,'zone'] = [0,0,1,1,2,2,3,3,0,0,1,1,2,2,3,3,4,4,5,5,6,6,7,7,4,4,5,5,6,6,7,7,8,8,9,9,10,10,11,11,8,8,9,9,10,10,11,11,12,12,13,13,14,14,15,15,12,12,13,13,14,14,15,15]
+    # sensors.loc[:,'zone'] = [0,0,4,4,8,8,12,12,0,0,4,4,8,8,12,12,1,1,5,5,9,9,13,13,1,1,5,5,9,9,13,13,2,2,6,6,10,10,14,14,2,2,6,6,10,10,14,14,3,3,7,7,11,11,15,15,3,3,7,7,11,11,15,15]
+    sensors.loc[:, 'zone'] = sensors['x'] // 2 + 4 * (sensors['y'] // 2)
+    
+    sensors = gpd.GeoDataFrame(sensors, 
+                                   geometry=gpd.points_from_xy(sensors['lon'], sensors['lat']),
+                                   crs=4326)
+    return dataloggers, sensors, origin
 
 def mra(data, wavelet, level=None, axis=-1, transform='swt',
         mode='periodization'):
