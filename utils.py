@@ -36,10 +36,8 @@ def save_ameriflux(filepath, save_as=None, save_file=True):
     '''
     NEED TO:
     - check all REddyProc names vs AmeriFlux variables
-    - switch FCH4_F#_RF to FCH4_F_RF_#
     - replace all _f with _F_MDS
     - copy NEE_{} to FC_{}?
-    - fix -9999 formatting as int
     '''
     if save_as is None:
         save_as = filepath[:-4] + '_fluxnet.csv'
@@ -61,6 +59,17 @@ def save_ameriflux(filepath, save_as=None, save_file=True):
               'ch4_flux': 'FCH4', # umol m-2 s-1 (convert to nmol below)
               'NEE_f': 'FC_F_MDS',
               'FCH4_f': 'FCH4_F_MDS',
+              'FCH4_F_UNCERTAINTY_RF': 'FCH4_F_RF_UNCERTAINTY',
+              'FCH4_F1_RF': 'FCH4_F_RF_1',
+              'FCH4_F2_RF': 'FCH4_F_RF_2',
+              'FCH4_F3_RF': 'FCH4_F_RF_3',
+              'FCH4_F4_RF': 'FCH4_F_RF_4',
+              'FCH4_F5_RF': 'FCH4_F_RF_5',
+              'FCH4_F6_RF': 'FCH4_F_RF_6',
+              'FCH4_F7_RF': 'FCH4_F_RF_7',
+              'FCH4_F8_RF': 'FCH4_F_RF_8',
+              'FCH4_F9_RF': 'FCH4_F_RF_9',
+              'FCH4_F10_RF': 'FCH4_F_RF_10',
               'h2o_mole_fraction': 'H2O', # mmol mol-1
               'h2o_mixing_ratio': 'H2O_MIXING_RATIO', # mmol mol-1
               'h2o_flux': 'FH2O', # mmol m-2 s-1
@@ -161,7 +170,7 @@ def save_ameriflux(filepath, save_as=None, save_file=True):
     # rename Reco and Tsoil
     df.columns = df.columns.str.replace('Reco_', 'RECO_')
     # df.columns = df.columns.str.replace('Tsoil', 'TS')
-    fch4cols = df.columns.str.contains(r'FCH4_F\d+_RF', regex=True)
+    # fch4cols = df.columns.str.contains(r'FCH4_F\d+_RF', regex=True)
     fch4cols = df.columns.str.contains(r'FCH4_F', regex=True)
     print(df.columns[fch4cols])
     # df.columns = df.columns.difference(fch4cols) + df.columns[fch4cols].str.replace('FCH4_F', 'FCH4_F_RF_').str.replace('_RF', '')
@@ -192,7 +201,7 @@ def save_ameriflux(filepath, save_as=None, save_file=True):
         else:
             df2.to_csv(f'./output/csv/US-AMS_HH_{df['TIMESTAMP_START'].iloc[0]}_{df['TIMESTAMP_START'].iloc[-1]}.csv', index = False)
 #     df.to_csv(save_as=f'./output/csv/ATMOS_L3_{datetime.now().strftime("%Y-%m-%d")}_fluxnet.csv', index=False)
-    df2.to_csv(f'./output/csv/US-AMS_HH_{df['TIMESTAMP_START'].iloc[0]}_{df['TIMESTAMP_START'].iloc[-1]}.csv', index = False)
+    df2.to_csv(f'/output/csv/US-AMS_HH_{df['TIMESTAMP_START'].iloc[0]}_{df['TIMESTAMP_START'].iloc[-1]}.csv', index = False)
     
     return df2
 
